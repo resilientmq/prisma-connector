@@ -83,20 +83,47 @@ export interface Prisma8EventStoreOptions {
     operators: Prisma8LogicalOperators;
 }
 
+/** Builds experimental Prisma 8 PostgreSQL stores over the contract query API. */
+export class Prisma8PostgresEventStoreFactory {
+    private readonly inboxDelegate: Prisma8Delegate;
+    private readonly outboxDelegate: Prisma8Delegate;
+    private readonly namespace: string;
+
+    /** Resolves the configured contract namespace and ResilientMQ collections. */
+    constructor(options: Prisma8EventStoreOptions) {
+        const databaseNamespace = options.databaseNamespace ?? 'public';
+        const models = options.client.orm[databaseNamespace];
+        if (!models) throw new Error(`Prisma 8 client does not expose the "${databaseNamespace}" namespace`);
+        const inbox = models.ResilientMqInboxEvent;
+        const outbox = models.ResilientMqOutboxEvent;
+        if (!inbox || !outbox) throw new Error('Prisma 8 contract does not expose the ResilientMQ models');
+        this.inboxDelegate = new Prisma8Delegate(inbox, options.operators);
+        this.outboxDelegate = new Prisma8Delegate(outbox, options.operators);
+        this.namespace = options.namespace;
+    }
+
+    /** Creates the experimental inbox store. */
+    createConsumerStore(): PrismaConsumerEventStore {
+        return new PrismaConsumerEventStore(this.inboxDelegate, this.namespace);
+    }
+
+    /** Creates the experimental outbox store. */
+    createPublisherStore(): PrismaPublisherEventStore {
+        return new PrismaPublisherEventStore(this.outboxDelegate, this.namespace);
+    }
+
+    /** Creates the experimental inbox and outbox stores as one pair. */
+    createEventStores(): PrismaEventStores {
+        return {
+            consumer: this.createConsumerStore(),
+            publisher: this.createPublisherStore()
+        };
+    }
+}
+
 /** Creates experimental Prisma 8 PostgreSQL stores over the contract query API. */
 export function createPrisma8PostgresEventStores(options: Prisma8EventStoreOptions): PrismaEventStores {
-    const databaseNamespace = options.databaseNamespace ?? 'public';
-    const models = options.client.orm[databaseNamespace];
-    if (!models) throw new Error(`Prisma 8 client does not expose the "${databaseNamespace}" namespace`);
-    const inbox = models.ResilientMqInboxEvent;
-    const outbox = models.ResilientMqOutboxEvent;
-    if (!inbox || !outbox) throw new Error('Prisma 8 contract does not expose the ResilientMQ models');
-    const inboxDelegate = new Prisma8Delegate(inbox, options.operators);
-    const outboxDelegate = new Prisma8Delegate(outbox, options.operators);
-    return {
-        consumer: new PrismaConsumerEventStore(inboxDelegate, options.namespace),
-        publisher: new PrismaPublisherEventStore(outboxDelegate, options.namespace)
-    };
+    return new Prisma8PostgresEventStoreFactory(options).createEventStores();
 }
 
 class Prisma8Delegate implements PrismaModelDelegate {

@@ -5,11 +5,9 @@ import {fileURLToPath} from 'node:url';
 import {spawnSync} from 'node:child_process';
 import {
     RESILIENTMQ_PRISMA_MODELS,
+    PrismaSchemaManager,
     getResilientMqPrismaModels,
-    type SupportedPrismaProvider,
-    preparePrismaSchemaUpdate,
-    resolvePrismaSchemaPath,
-    updatePrismaSchema
+    type SupportedPrismaProvider
 } from './schema/index.js';
 
 interface CliOptions {
@@ -20,45 +18,112 @@ interface CliOptions {
     provider?: SupportedPrismaProvider;
 }
 
+/** Writable stream surface used by the command-line interface. */
+export interface PrismaCliWriter {
+    /** Writes one user-facing message. */
+    write(message: string): unknown;
+}
+
+/** Executes application-local Prisma commands. */
+export interface PrismaCommandExecutor {
+    /** Runs Prisma with the supplied arguments or throws when it fails. */
+    execute(args: string[]): void;
+}
+
+/** Dependencies accepted by the command-line interface. */
+export interface PrismaConnectorCliOptions {
+    /** Application directory used for schema and binary discovery. */
+    cwd?: string;
+
+    /** Standard output writer. */
+    stdout?: PrismaCliWriter;
+
+    /** Standard error writer. */
+    stderr?: PrismaCliWriter;
+
+    /** Prisma command executor. */
+    commandExecutor?: PrismaCommandExecutor;
+}
+
+/** Executes the Prisma binary installed by the consuming application. */
+export class LocalPrismaCommandExecutor implements PrismaCommandExecutor {
+    /** Creates an executor rooted at the supplied application directory. */
+    constructor(private readonly cwd = process.cwd()) {}
+
+    /** Runs an application-local Prisma command synchronously. */
+    execute(args: string[]): void {
+        const binary = resolve(this.cwd, 'node_modules', '.bin', process.platform === 'win32' ? 'prisma.cmd' : 'prisma');
+        if (!existsSync(binary)) throw new Error('Prisma CLI is not installed in the application');
+        const result = spawnSync(binary, args, {cwd: this.cwd, stdio: 'inherit', shell: process.platform === 'win32'});
+        if (result.error) throw result.error;
+        if (result.status !== 0) throw new Error(`Prisma ${args[0]} failed with exit code ${result.status ?? 'unknown'}`);
+    }
+}
+
+/** Object-oriented command-line facade with injectable I/O and process execution. */
+export class PrismaConnectorCli {
+    private readonly cwd: string;
+    private readonly stdout: PrismaCliWriter;
+    private readonly stderr: PrismaCliWriter;
+    private readonly schemaManager: PrismaSchemaManager;
+    private readonly commandExecutor: PrismaCommandExecutor;
+
+    /** Creates a command-line facade for one application directory. */
+    constructor(options: PrismaConnectorCliOptions = {}) {
+        this.cwd = resolve(options.cwd ?? process.cwd());
+        this.stdout = options.stdout ?? process.stdout;
+        this.stderr = options.stderr ?? process.stderr;
+        this.schemaManager = new PrismaSchemaManager({cwd: this.cwd});
+        this.commandExecutor = options.commandExecutor ?? new LocalPrismaCommandExecutor(this.cwd);
+    }
+
+    /** Executes one CLI invocation and returns its process exit code. */
+    run(argv = process.argv.slice(2)): number {
+        try {
+            const options = parseArguments(argv);
+            if (options.command === 'help') {
+                this.stdout.write(helpText());
+                return 0;
+            }
+            if (options.command === 'print') {
+                this.stdout.write(`${options.provider ? getResilientMqPrismaModels(options.provider) : RESILIENTMQ_PRISMA_MODELS}\n`);
+                return 0;
+            }
+
+            const schemaPath = this.schemaManager.resolveSchemaPath(options.schema);
+            if (options.command === 'check') return this.checkSchema(schemaPath);
+
+            const update = this.schemaManager.update(schemaPath);
+            this.stdout.write(update.changed
+                ? `Added ${update.addedModels.join(', ')} to ${update.path}\n`
+                : `ResilientMQ Prisma models are already current in ${update.path}\n`);
+            const prismaSchemaTarget = resolvePrismaCommandTarget(update.path);
+            this.commandExecutor.execute(['format', '--schema', prismaSchemaTarget]);
+            if (options.migrate) {
+                this.commandExecutor.execute(['migrate', 'dev', '--schema', prismaSchemaTarget, '--name', options.migrationName]);
+            }
+            return 0;
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            this.stderr.write(`resilientmq-prisma: ${message}\n`);
+            return 1;
+        }
+    }
+
+    private checkSchema(schemaPath: string): number {
+        const update = this.schemaManager.prepareUpdate(schemaPath);
+        if (update.changed) {
+            this.stderr.write(`ResilientMQ Prisma models are missing from ${update.path}\n`);
+            return 1;
+        }
+        this.stdout.write(`ResilientMQ Prisma models are current in ${update.path}\n`);
+        return 0;
+    }
+}
+
 /** Executes the ResilientMQ Prisma schema CLI. */
 export function runCli(argv = process.argv.slice(2)): number {
-    try {
-        const options = parseArguments(argv);
-        if (options.command === 'help') {
-            process.stdout.write(helpText());
-            return 0;
-        }
-        if (options.command === 'print') {
-            process.stdout.write(`${options.provider ? getResilientMqPrismaModels(options.provider) : RESILIENTMQ_PRISMA_MODELS}\n`);
-            return 0;
-        }
-
-        const schemaPath = resolvePrismaSchemaPath(options.schema ? {schema: options.schema} : {});
-        if (options.command === 'check') {
-            const update = preparePrismaSchemaUpdate(schemaPath);
-            if (update.changed) {
-                process.stderr.write(`ResilientMQ Prisma models are missing from ${update.path}\n`);
-                return 1;
-            }
-            process.stdout.write(`ResilientMQ Prisma models are current in ${update.path}\n`);
-            return 0;
-        }
-
-        const update = updatePrismaSchema(schemaPath);
-        process.stdout.write(update.changed
-            ? `Added ${update.addedModels.join(', ')} to ${update.path}\n`
-            : `ResilientMQ Prisma models are already current in ${update.path}\n`);
-        const prismaSchemaTarget = resolvePrismaCommandTarget(update.path);
-        runPrisma(['format', '--schema', prismaSchemaTarget]);
-        if (options.migrate) {
-            runPrisma(['migrate', 'dev', '--schema', prismaSchemaTarget, '--name', options.migrationName]);
-        }
-        return 0;
-    } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        process.stderr.write(`resilientmq-prisma: ${message}\n`);
-        return 1;
-    }
+    return new PrismaConnectorCli().run(argv);
 }
 
 function parseArguments(argv: string[]): CliOptions {
@@ -90,14 +155,6 @@ function requireValue(argv: string[], index: number, option: string): string {
     const value = argv[index];
     if (!value) throw new Error(`${option} requires a value`);
     return value;
-}
-
-function runPrisma(args: string[]): void {
-    const binary = resolve(process.cwd(), 'node_modules', '.bin', process.platform === 'win32' ? 'prisma.cmd' : 'prisma');
-    if (!existsSync(binary)) throw new Error('Prisma CLI is not installed in the application');
-    const result = spawnSync(binary, args, {stdio: 'inherit', shell: process.platform === 'win32'});
-    if (result.error) throw result.error;
-    if (result.status !== 0) throw new Error(`Prisma ${args[0]} failed with exit code ${result.status ?? 'unknown'}`);
 }
 
 function resolvePrismaCommandTarget(schemaPath: string): string {

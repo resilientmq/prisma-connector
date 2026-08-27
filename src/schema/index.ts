@@ -5,6 +5,7 @@ export {
     type SupportedPrismaProvider
 } from './templates.js';
 export {
+    PrismaSchemaManager,
     preparePrismaSchemaUpdate,
     resolvePrismaSchemaPath,
     updatePrismaSchema,

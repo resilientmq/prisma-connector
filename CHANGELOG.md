@@ -20,6 +20,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   test coverage.
 - Real integration coverage for SQLite, PostgreSQL, and MariaDB.
 - Experimental Prisma 8 PostgreSQL collection bridge and contract models.
+- Object-oriented factories for the stable and experimental stores, plus an
+  object-oriented schema manager and injectable CLI.
+- Unit coverage above 90% for statements, lines, and functions, with edge-case
+  coverage for serialization, timestamps, schema discovery, and CLI execution.
+- Clean-checkout type checking that generates and validates integration clients
+  before checking database-specific test types.
+- Persistence model and production schema rollout documentation.
 - npm trusted publishing workflow using GitHub OIDC and provenance.
 
 [Unreleased]: https://github.com/resilientmq/prisma-connector/compare/v0.1.0...HEAD

@@ -1,4 +1,9 @@
-import {createPrismaEventStores} from '../src/index.js';
+import {
+    PrismaConsumerEventStore,
+    PrismaEventStoreFactory,
+    PrismaPublisherEventStore,
+    createPrismaEventStores
+} from '../src/index.js';
 import {MemoryPrismaDelegate} from './support/memory-delegate.js';
 
 describe('createPrismaEventStores', () => {
@@ -15,5 +20,22 @@ describe('createPrismaEventStores', () => {
     it('rejects an empty namespace or missing model delegate', () => {
         expect(() => createPrismaEventStores({client: {}, namespace: ' '})).toThrow(/namespace/);
         expect(() => createPrismaEventStores({client: {}, namespace: 'service'})).toThrow(/resilientMqInboxEvent/);
+    });
+
+    it('creates each store independently through the object-oriented factory', () => {
+        const factory = new PrismaEventStoreFactory({
+            client: {
+                resilientMqInboxEvent: new MemoryPrismaDelegate(),
+                resilientMqOutboxEvent: new MemoryPrismaDelegate()
+            },
+            namespace: 'orders'
+        });
+
+        expect(factory.createConsumerStore()).toBeInstanceOf(PrismaConsumerEventStore);
+        expect(factory.createPublisherStore()).toBeInstanceOf(PrismaPublisherEventStore);
+        expect(factory.createEventStores()).toEqual({
+            consumer: expect.any(PrismaConsumerEventStore),
+            publisher: expect.any(PrismaPublisherEventStore)
+        });
     });
 });

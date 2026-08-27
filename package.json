@@ -26,6 +26,7 @@
   },
   "files": [
     "dist",
+    "docs",
     "prisma",
     "CHANGELOG.md",
     "README.md",
@@ -41,7 +42,7 @@
     "test": "vitest run",
     "test:unit": "vitest run",
     "test:integration:prepare": "prisma validate --config test/integration/prisma/prisma.config.ts && prisma generate --config test/integration/prisma/prisma.config.ts",
-    "test:integration": "npm run test:integration:prepare && vitest run --config vitest.integration.config.ts test/integration",
+    "test:integration": "npm run test:integration:prepare && tsc -p tsconfig.integration.json --noEmit && vitest run --config vitest.integration.config.ts test/integration",
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
     "check": "npm run typecheck && npm run test:unit && npm run test:integration && npm run build && npm pack --dry-run",
@@ -72,6 +73,7 @@
   "license": "MIT",
   "peerDependencies": {
     "@prisma/client": ">=6.19 <8",
+    "@prisma/orm-postgres": ">=8.0.0-0 <9",
     "@resilientmq/core": "^3.0.0"
   },
   "peerDependenciesMeta": {

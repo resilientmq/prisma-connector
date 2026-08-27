@@ -39,7 +39,7 @@ jobs:
           package-manager-cache: false
 
       - name: Install npm trusted publishing support
-        run: npm install --global npm@^11.5.1
+        run: npm install --global npm@^11.15.0
 
       - name: Read package metadata
         id: package
@@ -114,7 +114,7 @@ jobs:
           registry-url: https://registry.npmjs.org/
           package-manager-cache: false
 
-      - run: npm install --global npm@^11.5.1
+      - run: npm install --global npm@^11.15.0
       - run: npm ci
       - run: npm run build
 

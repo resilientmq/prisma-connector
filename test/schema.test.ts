@@ -2,6 +2,7 @@ import {mkdtempSync, mkdirSync, readFileSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {
+    PrismaSchemaManager,
     preparePrismaSchemaUpdate,
     resolvePrismaSchemaPath,
     updatePrismaSchema
@@ -85,5 +86,42 @@ model ResilientMqOutboxEvent {
         expect(() => preparePrismaSchemaUpdate(mongodb)).toThrow(/mongoose-connector/);
         writeFileSync(sqlserver, 'datasource db {\n  provider = "sqlserver"\n}\n');
         expect(() => preparePrismaSchemaUpdate(sqlserver)).toThrow(/not supported/);
+    });
+
+    it('supports object-oriented schema discovery and updates', () => {
+        const directory = mkdtempSync(join(tmpdir(), 'resilientmq-prisma-'));
+        mkdirSync(join(directory, 'prisma'));
+        const schema = join(directory, 'prisma', 'schema.prisma');
+        writeFileSync(schema, 'datasource db {\n  provider = "postgresql"\n}\n');
+        const manager = new PrismaSchemaManager({cwd: directory});
+
+        expect(manager.resolveSchemaPath()).toBe(schema);
+        expect(manager.prepareUpdate(schema).changed).toBe(true);
+        expect(manager.update(schema).changed).toBe(true);
+        expect(manager.prepareUpdate(schema).changed).toBe(false);
+    });
+
+    it('resolves explicit relative and absolute schema targets', () => {
+        const directory = mkdtempSync(join(tmpdir(), 'resilientmq-prisma-'));
+        const nested = join(directory, 'database');
+        mkdirSync(nested);
+        const schema = join(nested, 'events.prisma');
+        writeFileSync(schema, 'datasource db {}\n');
+        const manager = new PrismaSchemaManager({cwd: directory});
+
+        expect(manager.resolveSchemaPath('./database/events.prisma')).toBe(schema);
+        expect(manager.resolveSchemaPath(schema)).toBe(schema);
+        expect(manager.resolveSchemaPath('./generated')).toBe(join(directory, 'generated', 'resilientmq.prisma'));
+    });
+
+    it('rejects malformed model declarations and unterminated comments', () => {
+        const directory = mkdtempSync(join(tmpdir(), 'resilientmq-prisma-'));
+        const invalidModel = join(directory, 'invalid-model.prisma');
+        const invalidComment = join(directory, 'invalid-comment.prisma');
+        writeFileSync(invalidModel, 'model {\n}\n');
+        writeFileSync(invalidComment, '/* model ResilientMqInboxEvent {}');
+
+        expect(() => preparePrismaSchemaUpdate(invalidModel)).toThrow(/Invalid Prisma model/);
+        expect(() => preparePrismaSchemaUpdate(invalidComment)).toThrow(/Unterminated block comment/);
     });
 });

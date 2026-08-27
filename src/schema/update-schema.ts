@@ -33,6 +33,31 @@ export interface PrismaSchemaUpdate {
     addedModels: string[];
 }
 
+/** Manages discovery, validation, and idempotent installation of the connector models. */
+export class PrismaSchemaManager {
+    private readonly cwd: string;
+
+    /** Creates a manager rooted at the supplied application directory. */
+    constructor(options: Pick<ResolvePrismaSchemaOptions, 'cwd'> = {}) {
+        this.cwd = resolve(options.cwd ?? process.cwd());
+    }
+
+    /** Locates a Prisma schema using explicit and application-level conventions. */
+    resolveSchemaPath(schema?: string): string {
+        return resolvePrismaSchemaPath(schema ? {cwd: this.cwd, schema} : {cwd: this.cwd});
+    }
+
+    /** Computes the required schema change without writing it. */
+    prepareUpdate(path: string): PrismaSchemaUpdate {
+        return preparePrismaSchemaUpdate(path);
+    }
+
+    /** Writes the connector models when the target schema is not current. */
+    update(path: string): PrismaSchemaUpdate {
+        return updatePrismaSchema(path);
+    }
+}
+
 /** Locates a Prisma schema using CLI, package and Prisma configuration conventions. */
 export function resolvePrismaSchemaPath(options: ResolvePrismaSchemaOptions = {}): string {
     const cwd = resolve(options.cwd ?? process.cwd());

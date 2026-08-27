@@ -1,5 +1,6 @@
 import type {EventMessage} from '@resilientmq/core';
 import {
+    Prisma8PostgresEventStoreFactory,
     createPrisma8PostgresEventStores,
     type Prisma8CollectionLike,
     type Prisma8Expression,
@@ -68,6 +69,26 @@ describe('Prisma 8 experimental bridge', () => {
         expect(() => createPrisma8PostgresEventStores({
             client: {orm: {public: {}}}, namespace: 'v8', operators
         })).toThrow(/models/);
+    });
+
+    it('creates individual stores through the object-oriented bridge', () => {
+        const operators = {
+            and: (...expressions: Prisma8Expression[]) => ({op: 'and', expressions}),
+            or: (...expressions: Prisma8Expression[]) => ({op: 'or', expressions})
+        };
+        const factory = new Prisma8PostgresEventStoreFactory({
+            client: {orm: {events: {
+                ResilientMqInboxEvent: new MemoryPrisma8Collection([], 'inbox'),
+                ResilientMqOutboxEvent: new MemoryPrisma8Collection([], 'outbox')
+            }}},
+            databaseNamespace: 'events',
+            namespace: 'v8',
+            operators
+        });
+
+        expect(factory.createConsumerStore()).toBeDefined();
+        expect(factory.createPublisherStore()).toBeDefined();
+        expect(factory.createEventStores()).toMatchObject({consumer: expect.anything(), publisher: expect.anything()});
     });
 });
 
