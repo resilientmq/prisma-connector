@@ -1,0 +1,220 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master, develop]
+  pull_request:
+    branches: [main, master, develop]
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prisma-connector-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '24'
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  quality:
+    name: Quality - Node ${{ matrix.node-version }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: ['20.19', '22', '24']
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run test:unit
+
+      - name: Audit dependencies
+        run: npm audit --audit-level=high
+
+  coverage:
+    name: Unit coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - run: npm ci
+      - run: npm run test:coverage
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: coverage-report
+          path: |
+            coverage/coverage-summary.json
+            coverage/lcov.info
+            coverage/lcov-report/
+          if-no-files-found: error
+          retention-days: 14
+
+  prisma-6:
+    name: Prisma 6.19 compatibility
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '20.19'
+          cache: npm
+
+      - run: npm ci
+
+      - name: Install the Prisma 6 compatibility target
+        run: npm install --no-save --package-lock=false prisma@6.19.3 @prisma/client@6.19.3
+
+      - name: Generate the Prisma 6 client
+        run: npx prisma generate --schema test/compatibility/prisma6/schema.prisma
+
+      - name: Execute Prisma 6 integration tests
+        run: npx vitest run --config vitest.integration.config.ts test/compatibility/prisma6.test.ts
+        env:
+          TEST_PRISMA_MAJOR: '6'
+
+  prisma-7-sqlite:
+    name: Prisma 7 - SQLite
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - run: npm ci
+      - run: npm run test:integration
+
+  prisma-7-relational:
+    name: Prisma 7 - ${{ matrix.provider }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        provider: [postgresql, mysql]
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: resilientmq
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d resilientmq"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+      mariadb:
+        image: mariadb:11.8
+        env:
+          MARIADB_ROOT_PASSWORD: root
+          MARIADB_DATABASE: resilientmq
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mariadb-admin ping -h 127.0.0.1 -uroot -proot --silent"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - run: npm ci
+
+      - name: Validate and generate the provider client
+        shell: bash
+        run: |
+          npx prisma validate --config "test/integration/${TEST_DATABASE_PROVIDER}/prisma.config.ts"
+          npx prisma generate --config "test/integration/${TEST_DATABASE_PROVIDER}/prisma.config.ts"
+        env:
+          TEST_DATABASE_PROVIDER: ${{ matrix.provider }}
+          DATABASE_URL: ${{ matrix.provider == 'postgresql' && 'postgresql://postgres:postgres@localhost:5432/resilientmq' || 'mysql://root:root@localhost:3306/resilientmq' }}
+
+      - name: Create isolated test tables
+        run: node test/scripts/init-relational.mjs
+        env:
+          TEST_DATABASE_PROVIDER: ${{ matrix.provider }}
+          DATABASE_URL: ${{ matrix.provider == 'postgresql' && 'postgresql://postgres:postgres@localhost:5432/resilientmq' || 'mysql://root:root@localhost:3306/resilientmq' }}
+
+      - name: Execute contention tests
+        run: npx vitest run --config vitest.integration.config.ts test/integration/relational.test.ts
+        env:
+          TEST_DATABASE_PROVIDER: ${{ matrix.provider }}
+          DATABASE_URL: ${{ matrix.provider == 'postgresql' && 'postgresql://postgres:postgres@localhost:5432/resilientmq' || 'mysql://root:root@localhost:3306/resilientmq' }}
+
+  package:
+    name: Build and inspect package
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [quality, coverage, prisma-6, prisma-7-sqlite, prisma-7-relational]
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Require normalized npm metadata
+        shell: bash
+        run: |
+          cp package.json /tmp/package.json.before
+          npm pkg fix
+          if ! cmp -s package.json /tmp/package.json.before; then
+            echo "::error::package.json is not normalized; run npm pkg fix and commit the result"
+            git --no-pager diff -- package.json
+            exit 1
+          fi
+
+      - run: npm ci
+      - run: npm run build
+
+      - name: Inspect the publication tarball
+        shell: bash
+        run: |
+          npm pack --dry-run --json > /tmp/pack.json
+          node -e "const [p]=require('/tmp/pack.json'); const f=p.files.map(x=>x.path); const leaked=f.filter(x=>/^(src|test|coverage|node_modules|\.github)\//.test(x)); if(leaked.length) throw new Error('Unexpected files: '+leaked.join(', ')); for(const required of ['dist/index.js','dist/index.d.ts','dist/cli.js','prisma/resilientmq.prisma']) if(!f.includes(required)) throw new Error('Missing '+required); console.log(p.name, p.version, p.files.length+' files', p.size+' bytes')"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: package-dist
+          path: dist/
+          retention-days: 7

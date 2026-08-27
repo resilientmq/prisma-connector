@@ -1,0 +1,81 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../generated"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model ResilientMqInboxEvent {
+  id             String   @id @default(cuid())
+  namespace      String
+  serviceId      String
+  messageId      String
+  type           String?
+  payloadJson    Json
+  routingKey     String?
+  propertiesJson Json?
+  status         String
+  attempt        Int      @default(0)
+  instanceId     String?
+  fencingToken   String?
+  leaseExpiresAt DateTime?
+  lastAttemptAt  DateTime?
+  completedAt    DateTime?
+  errorName      String?
+  errorMessage   String?
+  errorStack     String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([namespace, serviceId, messageId])
+  @@index([namespace, status, leaseExpiresAt])
+  @@map("resilientmq_inbox_events")
+}
+
+model ResilientMqOutboxEvent {
+  id             String   @id @default(cuid())
+  namespace      String
+  messageId      String
+  type           String?
+  payloadJson    Json
+  routingKey     String?
+  propertiesJson Json?
+  status         String
+  attempt        Int      @default(0)
+  serviceId      String?
+  instanceId     String?
+  fencingToken   String?
+  leaseExpiresAt DateTime?
+  nextAttemptAt  DateTime?
+  lastAttemptAt  DateTime?
+  publishedAt    DateTime?
+  errorName      String?
+  errorMessage   String?
+  errorStack     String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([namespace, messageId])
+  @@index([namespace, status, nextAttemptAt, leaseExpiresAt])
+  @@map("resilientmq_outbox_events")
+}
+
+model ResilientMqMetricEvent {
+  id         String   @id @default(cuid())
+  namespace  String
+  name       String
+  timestamp  DateTime
+  messageId  String?
+  serviceId  String?
+  instanceId String?
+  attempt    Int?
+  durationMs Int?
+  errorName  String?
+  createdAt  DateTime @default(now())
+
+  @@index([namespace, timestamp])
+  @@index([namespace, name, timestamp])
+  @@map("resilientmq_metric_events")
+}

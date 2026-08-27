@@ -1,0 +1,17 @@
+node_modules/
+dist/
+coverage/
+test-results/
+test/integration/generated/
+test/integration/generated-postgresql/
+test/integration/generated-mysql/
+test/compatibility/generated-prisma6/
+test/compatibility/prisma6/*.db*
+test/integration/prisma/*.db*
+*.tgz
+.env
+.env.*
+!.env.example
+.idea/
+.vscode/
+*.log
