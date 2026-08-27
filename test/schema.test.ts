@@ -43,6 +43,20 @@ describe('Prisma schema installer', () => {
         expect(resolvePrismaSchemaPath({cwd: directory})).toBe(join(directory, 'prisma', 'resilientmq.prisma'));
     });
 
+    it('prefers package metadata over conventional paths while allowing an explicit override', () => {
+        const directory = mkdtempSync(join(tmpdir(), 'resilientmq-prisma-'));
+        mkdirSync(join(directory, 'prisma'));
+        mkdirSync(join(directory, 'database'));
+        const conventional = join(directory, 'prisma', 'schema.prisma');
+        const configured = join(directory, 'database', 'primary.prisma');
+        writeFileSync(conventional, 'datasource db { provider = "sqlite" }\n');
+        writeFileSync(configured, 'datasource db { provider = "postgresql" }\n');
+        writeFileSync(join(directory, 'package.json'), JSON.stringify({prisma: {schema: './database/primary.prisma'}}));
+
+        expect(resolvePrismaSchemaPath({cwd: directory})).toBe(configured);
+        expect(resolvePrismaSchemaPath({cwd: directory, schema: './prisma/schema.prisma'})).toBe(conventional);
+    });
+
     it('resolves a schema from prisma.config.ts', () => {
         const directory = mkdtempSync(join(tmpdir(), 'resilientmq-prisma-'));
         mkdirSync(join(directory, 'database'));
@@ -69,13 +83,65 @@ model ResilientMqOutboxEvent {
         expect(() => resolvePrismaSchemaPath({cwd: directory})).toThrow(/--schema/);
     });
 
-    it('uses unbounded text fields for MySQL payloads', () => {
+    it('uses native JSON and provider-specific error text for MySQL', () => {
         const directory = mkdtempSync(join(tmpdir(), 'resilientmq-prisma-'));
         const schema = join(directory, 'schema.prisma');
         writeFileSync(schema, 'datasource db {\n  provider = "mysql"\n}\n');
         const update = preparePrismaSchemaUpdate(schema);
-        expect(update.after).toContain('payloadJson    String   @db.LongText');
+        expect(update.after).toContain('payloadJson    Json');
+        expect(update.after).toContain('propertiesJson Json?');
         expect(update.after).toContain('errorMessage   String?  @db.Text');
+    });
+
+    it('uses PostgreSQL JSONB and SQLite JSON from the detected datasource', () => {
+        const directory = mkdtempSync(join(tmpdir(), 'resilientmq-prisma-'));
+        const postgresql = join(directory, 'postgresql.prisma');
+        const sqlite = join(directory, 'sqlite.prisma');
+        writeFileSync(postgresql, 'datasource db {\n  provider = "postgresql"\n}\n');
+        writeFileSync(sqlite, 'datasource db {\n  provider = "sqlite"\n}\n');
+
+        expect(preparePrismaSchemaUpdate(postgresql).after).toContain('payloadJson    Json @db.JsonB');
+        expect(preparePrismaSchemaUpdate(sqlite).after).toContain('payloadJson    Json\n');
+        expect(preparePrismaSchemaUpdate(sqlite).after).not.toContain('@db.JsonB');
+    });
+
+    it('installs optional metrics with custom physical table names', () => {
+        const directory = mkdtempSync(join(tmpdir(), 'resilientmq-prisma-'));
+        const schema = join(directory, 'schema.prisma');
+        writeFileSync(schema, 'datasource db {\n  provider = "postgresql"\n}\n');
+        const options = {
+            metrics: true,
+            tables: {inbox: 'app_inbox', outbox: 'app_outbox', metrics: 'app_metrics'}
+        } as const;
+
+        const first = updatePrismaSchema(schema, options);
+        const second = preparePrismaSchemaUpdate(schema, options);
+        expect(first.addedModels).toEqual([
+            'ResilientMqInboxEvent', 'ResilientMqOutboxEvent', 'ResilientMqMetricEvent'
+        ]);
+        expect(first.after).toContain('model ResilientMqMetricEvent');
+        expect(first.after).toContain('@@map("app_inbox")');
+        expect(first.after).toContain('@@map("app_outbox")');
+        expect(first.after).toContain('@@map("app_metrics")');
+        expect(second.changed).toBe(false);
+    });
+
+    it('can add metrics later without duplicating the event models', () => {
+        const directory = mkdtempSync(join(tmpdir(), 'resilientmq-prisma-'));
+        const schema = join(directory, 'schema.prisma');
+        writeFileSync(schema, 'datasource db {\n  provider = "sqlite"\n}\n');
+        updatePrismaSchema(schema);
+        const update = updatePrismaSchema(schema, {metrics: true});
+        expect(update.addedModels).toEqual(['ResilientMqMetricEvent']);
+        expect(update.after.match(/model ResilientMqInboxEvent/g)).toHaveLength(1);
+    });
+
+    it('rejects requested table mappings that differ from installed models', () => {
+        const directory = mkdtempSync(join(tmpdir(), 'resilientmq-prisma-'));
+        const schema = join(directory, 'schema.prisma');
+        writeFileSync(schema, 'datasource db {\n  provider = "sqlite"\n}\n');
+        updatePrismaSchema(schema, {tables: {inbox: 'first_inbox'}});
+        expect(() => preparePrismaSchemaUpdate(schema, {tables: {inbox: 'other_inbox'}})).toThrow(/first_inbox/);
     });
 
     it('rejects MongoDB and providers outside the supported matrix', () => {

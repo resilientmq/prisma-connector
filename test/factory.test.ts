@@ -35,7 +35,48 @@ describe('createPrismaEventStores', () => {
         expect(factory.createPublisherStore()).toBeInstanceOf(PrismaPublisherEventStore);
         expect(factory.createEventStores()).toEqual({
             consumer: expect.any(PrismaConsumerEventStore),
-            publisher: expect.any(PrismaPublisherEventStore)
+            publisher: expect.any(PrismaPublisherEventStore),
+            consumerOptions: {store: expect.any(PrismaConsumerEventStore)},
+            publisherOptions: {store: expect.any(PrismaPublisherEventStore)}
         });
+    });
+
+    it('creates one buffered metrics sink and ready-to-spread runtime options', async () => {
+        const metrics = new MemoryPrismaDelegate();
+        const stores = createPrismaEventStores({
+            client: {
+                resilientMqInboxEvent: new MemoryPrismaDelegate(),
+                resilientMqOutboxEvent: new MemoryPrismaDelegate(),
+                resilientMqMetricEvent: metrics
+            },
+            namespace: 'orders',
+            metrics: {bufferCapacity: 20, batchSize: 5}
+        });
+
+        expect(stores.consumerOptions).toEqual({store: stores.consumer, metricsSink: stores.metricsSink});
+        expect(stores.publisherOptions).toEqual({store: stores.publisher, metricsSink: stores.metricsSink});
+        stores.metricsSink?.emit({
+            name: 'publish.confirmed',
+            timestamp: 1_000,
+            messageId: 'event-1',
+            durationMs: 12
+        });
+        await stores.metricsSink?.flush();
+        expect(metrics.rows).toMatchObject([{
+            namespace: 'orders',
+            name: 'publish.confirmed',
+            timestamp: new Date(1_000),
+            messageId: 'event-1',
+            durationMs: 12
+        }]);
+    });
+
+    it('requires the metrics delegate only when metrics persistence is enabled', () => {
+        const client = {
+            resilientMqInboxEvent: new MemoryPrismaDelegate(),
+            resilientMqOutboxEvent: new MemoryPrismaDelegate()
+        };
+        expect(() => createPrismaEventStores({client, namespace: 'orders'})).not.toThrow();
+        expect(() => createPrismaEventStores({client, namespace: 'orders', metrics: true})).toThrow(/resilientMqMetricEvent/);
     });
 });

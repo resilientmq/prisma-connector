@@ -25,7 +25,26 @@ describe('resilientmq-prisma CLI', () => {
         expect(runCli(['schema', 'print', '--provider', 'mysql'])).toBe(0);
         expect(process.stdout.write).toHaveBeenCalledWith(expect.stringContaining('Usage:'));
         expect(process.stdout.write).toHaveBeenCalledWith(expect.stringContaining('model ResilientMqInboxEvent'));
-        expect(process.stdout.write).toHaveBeenCalledWith(expect.stringContaining('@db.LongText'));
+        expect(process.stdout.write).toHaveBeenCalledWith(expect.stringContaining('payloadJson    Json'));
+    });
+
+    it('prints metrics and custom physical table mappings', () => {
+        expect(runCli([
+            'schema', 'print', '--provider', 'postgresql', '--metrics',
+            '--inbox-table', 'orders_inbox', '--outbox-table', 'orders_outbox',
+            '--metrics-table', 'orders_metrics'
+        ])).toBe(0);
+        expect(process.stdout.write).toHaveBeenCalledWith(expect.stringContaining('Json @db.JsonB'));
+        expect(process.stdout.write).toHaveBeenCalledWith(expect.stringContaining('model ResilientMqMetricEvent'));
+        expect(process.stdout.write).toHaveBeenCalledWith(expect.stringContaining('@@map("orders_metrics")'));
+    });
+
+    it('treats a custom metrics table as enabling metrics installation', () => {
+        expect(runCli([
+            'schema', 'print', '--provider', 'sqlite', '--metrics-table', 'runtime_metrics'
+        ])).toBe(0);
+        expect(process.stdout.write).toHaveBeenCalledWith(expect.stringContaining('model ResilientMqMetricEvent'));
+        expect(process.stdout.write).toHaveBeenCalledWith(expect.stringContaining('@@map("runtime_metrics")'));
     });
 
     it('returns a failing check until both models exist', () => {

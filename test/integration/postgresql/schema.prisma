@@ -13,9 +13,9 @@ model ResilientMqInboxEvent {
   serviceId String
   messageId String
   type String?
-  payloadJson String
+  payloadJson Json @db.JsonB
   routingKey String?
-  propertiesJson String?
+  propertiesJson Json? @db.JsonB
   status String
   attempt Int @default(0)
   instanceId String?
@@ -39,9 +39,9 @@ model ResilientMqOutboxEvent {
   namespace String
   messageId String
   type String?
-  payloadJson String
+  payloadJson Json @db.JsonB
   routingKey String?
-  propertiesJson String?
+  propertiesJson Json? @db.JsonB
   status String
   attempt Int @default(0)
   serviceId String?
@@ -60,4 +60,22 @@ model ResilientMqOutboxEvent {
   @@unique([namespace, messageId])
   @@index([namespace, status, nextAttemptAt, leaseExpiresAt])
   @@map("resilientmq_outbox_events")
+}
+
+model ResilientMqMetricEvent {
+  id         String   @id @default(cuid())
+  namespace  String
+  name       String
+  timestamp  DateTime
+  messageId  String?
+  serviceId  String?
+  instanceId String?
+  attempt    Int?
+  durationMs Int?
+  errorName  String?
+  createdAt  DateTime @default(now())
+
+  @@index([namespace, timestamp])
+  @@index([namespace, name, timestamp])
+  @@map("resilientmq_metric_events")
 }

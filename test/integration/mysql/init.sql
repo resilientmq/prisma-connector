@@ -4,9 +4,9 @@ CREATE TABLE IF NOT EXISTS resilientmq_inbox_events (
     serviceId VARCHAR(191) NOT NULL,
     messageId VARCHAR(191) NOT NULL,
     type VARCHAR(191),
-    payloadJson LONGTEXT NOT NULL,
+    payloadJson JSON NOT NULL,
     routingKey VARCHAR(191),
-    propertiesJson LONGTEXT,
+    propertiesJson JSON,
     status VARCHAR(191) NOT NULL,
     attempt INTEGER NOT NULL DEFAULT 0,
     instanceId VARCHAR(191),
@@ -28,9 +28,9 @@ CREATE TABLE IF NOT EXISTS resilientmq_outbox_events (
     namespace VARCHAR(191) NOT NULL,
     messageId VARCHAR(191) NOT NULL,
     type VARCHAR(191),
-    payloadJson LONGTEXT NOT NULL,
+    payloadJson JSON NOT NULL,
     routingKey VARCHAR(191),
-    propertiesJson LONGTEXT,
+    propertiesJson JSON,
     status VARCHAR(191) NOT NULL,
     attempt INTEGER NOT NULL DEFAULT 0,
     serviceId VARCHAR(191),
@@ -47,4 +47,20 @@ CREATE TABLE IF NOT EXISTS resilientmq_outbox_events (
     updatedAt DATETIME(3) NOT NULL,
     UNIQUE KEY resilientmq_outbox_identity (namespace, messageId),
     KEY resilientmq_outbox_claims (namespace, status, nextAttemptAt, leaseExpiresAt)
+);
+
+CREATE TABLE IF NOT EXISTS resilientmq_metric_events (
+    id VARCHAR(191) PRIMARY KEY,
+    namespace VARCHAR(191) NOT NULL,
+    name VARCHAR(191) NOT NULL,
+    timestamp DATETIME(3) NOT NULL,
+    messageId VARCHAR(191),
+    serviceId VARCHAR(191),
+    instanceId VARCHAR(191),
+    attempt INTEGER,
+    durationMs INTEGER,
+    errorName VARCHAR(191),
+    createdAt DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    KEY resilientmq_metrics_time (namespace, timestamp),
+    KEY resilientmq_metrics_name_time (namespace, name, timestamp)
 );

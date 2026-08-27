@@ -4,9 +4,9 @@ CREATE TABLE IF NOT EXISTS resilientmq_inbox_events (
     "serviceId" TEXT NOT NULL,
     "messageId" TEXT NOT NULL,
     type TEXT,
-    "payloadJson" TEXT NOT NULL,
+    "payloadJson" JSONB NOT NULL,
     "routingKey" TEXT,
-    "propertiesJson" TEXT,
+    "propertiesJson" JSONB,
     status TEXT NOT NULL,
     attempt INTEGER NOT NULL DEFAULT 0,
     "instanceId" TEXT,
@@ -30,9 +30,9 @@ CREATE TABLE IF NOT EXISTS resilientmq_outbox_events (
     namespace TEXT NOT NULL,
     "messageId" TEXT NOT NULL,
     type TEXT,
-    "payloadJson" TEXT NOT NULL,
+    "payloadJson" JSONB NOT NULL,
     "routingKey" TEXT,
-    "propertiesJson" TEXT,
+    "propertiesJson" JSONB,
     status TEXT NOT NULL,
     attempt INTEGER NOT NULL DEFAULT 0,
     "serviceId" TEXT,
@@ -52,3 +52,22 @@ CREATE TABLE IF NOT EXISTS resilientmq_outbox_events (
 
 CREATE INDEX IF NOT EXISTS resilientmq_outbox_claims
     ON resilientmq_outbox_events(namespace, status, "nextAttemptAt", "leaseExpiresAt");
+
+CREATE TABLE IF NOT EXISTS resilientmq_metric_events (
+    id TEXT PRIMARY KEY,
+    namespace TEXT NOT NULL,
+    name TEXT NOT NULL,
+    timestamp TIMESTAMP(3) NOT NULL,
+    "messageId" TEXT,
+    "serviceId" TEXT,
+    "instanceId" TEXT,
+    attempt INTEGER,
+    "durationMs" INTEGER,
+    "errorName" TEXT,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS resilientmq_metrics_time
+    ON resilientmq_metric_events(namespace, timestamp);
+CREATE INDEX IF NOT EXISTS resilientmq_metrics_name_time
+    ON resilientmq_metric_events(namespace, name, timestamp);

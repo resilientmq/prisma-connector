@@ -9,6 +9,7 @@ interface IntegrationPrismaClient extends PrismaClientLike {
     $disconnect(): Promise<void>;
     resilientMqInboxEvent: {deleteMany(): Promise<unknown>};
     resilientMqOutboxEvent: {deleteMany(): Promise<unknown>};
+    resilientMqMetricEvent: {deleteMany(): Promise<unknown>; findMany(): Promise<Array<Record<string, unknown>>>};
 }
 
 type PrismaClientConstructor = new (options: {adapter: unknown}) => IntegrationPrismaClient;
@@ -34,6 +35,7 @@ integration(`Prisma 7 ${provider ?? 'relational'} integration`, () => {
     beforeEach(async () => {
         await prisma.resilientMqInboxEvent.deleteMany();
         await prisma.resilientMqOutboxEvent.deleteMany();
+        await prisma.resilientMqMetricEvent.deleteMany();
     });
 
     afterAll(async () => {
@@ -64,5 +66,19 @@ integration(`Prisma 7 ${provider ?? 'relational'} integration`, () => {
         const claimed = batches.flat().map(claim => claim.event.messageId);
         expect(claimed).toHaveLength(48);
         expect(new Set(claimed)).toHaveLength(48);
+    });
+
+    it('stores native JSON payloads and buffered metric facts', async () => {
+        const stores = createPrismaEventStores({client: prisma, namespace: 'relational', metrics: true});
+        await stores.publisher.saveEvent(message);
+        await expect(stores.publisher.getEvent(message)).resolves.toMatchObject(message);
+        stores.metricsSink?.emit({name: 'publish.confirmed', timestamp: 2_000, messageId: message.messageId});
+        await stores.metricsSink?.flush();
+        await expect(prisma.resilientMqMetricEvent.findMany()).resolves.toMatchObject([{
+            namespace: 'relational',
+            name: 'publish.confirmed',
+            messageId: message.messageId,
+            timestamp: new Date(2_000)
+        }]);
     });
 });

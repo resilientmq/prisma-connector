@@ -7,6 +7,7 @@ import {
     RESILIENTMQ_PRISMA_MODELS,
     PrismaSchemaManager,
     getResilientMqPrismaModels,
+    type PrismaSchemaInstallOptions,
     type SupportedPrismaProvider
 } from './schema/index.js';
 
@@ -16,6 +17,10 @@ interface CliOptions {
     migrate: boolean;
     migrationName: string;
     provider?: SupportedPrismaProvider;
+    metrics: boolean;
+    inboxTable?: string;
+    outboxTable?: string;
+    metricsTable?: string;
 }
 
 /** Writable stream surface used by the command-line interface. */
@@ -86,14 +91,18 @@ export class PrismaConnectorCli {
                 return 0;
             }
             if (options.command === 'print') {
-                this.stdout.write(`${options.provider ? getResilientMqPrismaModels(options.provider) : RESILIENTMQ_PRISMA_MODELS}\n`);
+                const schemaOptions = toSchemaOptions(options);
+                this.stdout.write(`${options.provider
+                    ? getResilientMqPrismaModels({...schemaOptions, provider: options.provider})
+                    : hasSchemaFeatures(options) ? getResilientMqPrismaModels(schemaOptions) : RESILIENTMQ_PRISMA_MODELS}\n`);
                 return 0;
             }
 
             const schemaPath = this.schemaManager.resolveSchemaPath(options.schema);
-            if (options.command === 'check') return this.checkSchema(schemaPath);
+            const schemaOptions = toSchemaOptions(options);
+            if (options.command === 'check') return this.checkSchema(schemaPath, schemaOptions);
 
-            const update = this.schemaManager.update(schemaPath);
+            const update = this.schemaManager.update(schemaPath, schemaOptions);
             this.stdout.write(update.changed
                 ? `Added ${update.addedModels.join(', ')} to ${update.path}\n`
                 : `ResilientMQ Prisma models are already current in ${update.path}\n`);
@@ -110,8 +119,8 @@ export class PrismaConnectorCli {
         }
     }
 
-    private checkSchema(schemaPath: string): number {
-        const update = this.schemaManager.prepareUpdate(schemaPath);
+    private checkSchema(schemaPath: string, options: PrismaSchemaInstallOptions): number {
+        const update = this.schemaManager.prepareUpdate(schemaPath, options);
         if (update.changed) {
             this.stderr.write(`ResilientMQ Prisma models are missing from ${update.path}\n`);
             return 1;
@@ -134,13 +143,22 @@ function parseArguments(argv: string[]): CliOptions {
         throw new Error(`Unknown command "${command}"`);
     }
     const normalized = command === '--help' || command === '-h' ? 'help' : command as CliOptions['command'];
-    const options: CliOptions = {command: normalized, migrate: false, migrationName: 'add_resilientmq_event_store'};
+    const options: CliOptions = {
+        command: normalized,
+        migrate: false,
+        metrics: false,
+        migrationName: 'add_resilientmq_event_store'
+    };
     for (let index = offset; index < argv.length; index += 1) {
         const argument = argv[index];
         if (argument === '--migrate') options.migrate = true;
+        else if (argument === '--metrics') options.metrics = true;
         else if (argument === '--schema') options.schema = requireValue(argv, ++index, argument);
         else if (argument === '--migration-name') options.migrationName = requireValue(argv, ++index, argument);
         else if (argument === '--provider') options.provider = parseProvider(requireValue(argv, ++index, argument));
+        else if (argument === '--inbox-table') options.inboxTable = requireValue(argv, ++index, argument);
+        else if (argument === '--outbox-table') options.outboxTable = requireValue(argv, ++index, argument);
+        else if (argument === '--metrics-table') options.metricsTable = requireValue(argv, ++index, argument);
         else throw new Error(`Unknown option "${argument}"`);
     }
     return options;
@@ -155,6 +173,23 @@ function requireValue(argv: string[], index: number, option: string): string {
     const value = argv[index];
     if (!value) throw new Error(`${option} requires a value`);
     return value;
+}
+
+function toSchemaOptions(options: CliOptions): PrismaSchemaInstallOptions {
+    const tables = Object.fromEntries([
+        ['inbox', options.inboxTable],
+        ['outbox', options.outboxTable],
+        ['metrics', options.metricsTable]
+    ].filter((entry): entry is [string, string] => entry[1] !== undefined));
+    return {
+        metrics: options.metrics || options.metricsTable !== undefined,
+        ...(Object.keys(tables).length > 0 ? {tables} : {})
+    };
+}
+
+function hasSchemaFeatures(options: CliOptions): boolean {
+    return options.metrics || options.inboxTable !== undefined
+        || options.outboxTable !== undefined || options.metricsTable !== undefined;
 }
 
 function resolvePrismaCommandTarget(schemaPath: string): string {
@@ -177,6 +212,10 @@ Options:
   --migrate                Run prisma migrate dev after updating the schema
   --migration-name <name>  Migration name used with --migrate
   --provider <provider>    Provider used by schema print: postgresql, mysql, sqlite
+  --metrics                Add the optional event-oriented metrics model
+  --inbox-table <name>     Physical inbox table name used by @@map
+  --outbox-table <name>    Physical outbox table name used by @@map
+  --metrics-table <name>   Physical metrics table name used by @@map
 `;
 }
 

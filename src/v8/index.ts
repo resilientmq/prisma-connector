@@ -114,9 +114,13 @@ export class Prisma8PostgresEventStoreFactory {
 
     /** Creates the experimental inbox and outbox stores as one pair. */
     createEventStores(): PrismaEventStores {
+        const consumer = this.createConsumerStore();
+        const publisher = this.createPublisherStore();
         return {
-            consumer: this.createConsumerStore(),
-            publisher: this.createPublisherStore()
+            consumer,
+            publisher,
+            consumerOptions: {store: consumer},
+            publisherOptions: {store: publisher}
         };
     }
 }

@@ -1,8 +1,10 @@
 import {existsSync, readFileSync, readdirSync, statSync, writeFileSync} from 'node:fs';
 import {dirname, extname, isAbsolute, join, resolve} from 'node:path';
 import {
+    RESILIENTMQ_METRICS_MODEL_NAME,
     RESILIENTMQ_MODEL_NAMES,
-    getResilientMqPrismaModels,
+    getResilientMqPrismaModel,
+    type ResilientMqPrismaSchemaOptions,
     type SupportedPrismaProvider
 } from './templates.js';
 
@@ -33,6 +35,9 @@ export interface PrismaSchemaUpdate {
     addedModels: string[];
 }
 
+/** Optional models and physical mappings installed into an application schema. */
+export type PrismaSchemaInstallOptions = Omit<ResilientMqPrismaSchemaOptions, 'provider'>;
+
 /** Manages discovery, validation, and idempotent installation of the connector models. */
 export class PrismaSchemaManager {
     private readonly cwd: string;
@@ -48,13 +53,13 @@ export class PrismaSchemaManager {
     }
 
     /** Computes the required schema change without writing it. */
-    prepareUpdate(path: string): PrismaSchemaUpdate {
-        return preparePrismaSchemaUpdate(path);
+    prepareUpdate(path: string, options: PrismaSchemaInstallOptions = {}): PrismaSchemaUpdate {
+        return preparePrismaSchemaUpdate(path, options);
     }
 
     /** Writes the connector models when the target schema is not current. */
-    update(path: string): PrismaSchemaUpdate {
-        return updatePrismaSchema(path);
+    update(path: string, options: PrismaSchemaInstallOptions = {}): PrismaSchemaUpdate {
+        return updatePrismaSchema(path, options);
     }
 }
 
@@ -71,20 +76,27 @@ export function resolvePrismaSchemaPath(options: ResolvePrismaSchemaOptions = {}
 }
 
 /** Computes the idempotent schema change without writing it. */
-export function preparePrismaSchemaUpdate(path: string): PrismaSchemaUpdate {
+export function preparePrismaSchemaUpdate(
+    path: string,
+    options: PrismaSchemaInstallOptions = {}
+): PrismaSchemaUpdate {
     const absolutePath = resolve(path);
     const before = existsSync(absolutePath) ? readFileSync(absolutePath, 'utf8') : '';
     const existing = scanTopLevelModels(before);
-    const missing = RESILIENTMQ_MODEL_NAMES.filter(name => !existing.has(name));
-    if (missing.length === 0) {
-        validateOwnedModels(existing);
-        return {path: absolutePath, before, after: before, changed: false, addedModels: []};
+    const missingEvents = RESILIENTMQ_MODEL_NAMES.filter(name => !existing.has(name));
+    if (missingEvents.length === 1) {
+        throw new Error(`Prisma schema contains only part of the ResilientMQ models; missing ${missingEvents[0]}`);
     }
-    if (missing.length !== RESILIENTMQ_MODEL_NAMES.length) {
-        throw new Error(`Prisma schema contains only part of the ResilientMQ models; missing ${missing.join(', ')}`);
+    validateOwnedModels(existing, options);
+    const missing: string[] = [...missingEvents];
+    if (options.metrics && !existing.has(RESILIENTMQ_METRICS_MODEL_NAME)) {
+        missing.push(RESILIENTMQ_METRICS_MODEL_NAME);
     }
+    if (missing.length === 0) return {path: absolutePath, before, after: before, changed: false, addedModels: []};
+
     const provider = detectProvider(absolutePath, before);
-    const models = getResilientMqPrismaModels(provider);
+    const renderOptions = provider ? {...options, provider} : options;
+    const models = missing.map(name => getResilientMqPrismaModel(name, renderOptions)).join('\n\n');
     const separator = before.length === 0 ? '' : before.endsWith('\n') ? '\n' : '\n\n';
     const after = `${before}${separator}${models}\n`;
     return {path: absolutePath, before, after, changed: true, addedModels: [...missing]};
@@ -110,8 +122,8 @@ function detectProvider(schemaPath: string, source: string): SupportedPrismaProv
 }
 
 /** Writes the required models when the schema is not already current. */
-export function updatePrismaSchema(path: string): PrismaSchemaUpdate {
-    const update = preparePrismaSchemaUpdate(path);
+export function updatePrismaSchema(path: string, options: PrismaSchemaInstallOptions = {}): PrismaSchemaUpdate {
+    const update = preparePrismaSchemaUpdate(path, options);
     if (update.changed) writeFileSync(update.path, update.after, 'utf8');
     return update;
 }
@@ -174,10 +186,11 @@ function scanTopLevelModels(source: string): Map<string, ModelBlock> {
     return models;
 }
 
-function validateOwnedModels(models: Map<string, ModelBlock>): void {
+function validateOwnedModels(models: Map<string, ModelBlock>, options: PrismaSchemaInstallOptions): void {
     const required = {
         ResilientMqInboxEvent: ['namespace', 'serviceId', 'messageId', 'status', 'fencingToken', 'leaseExpiresAt'],
-        ResilientMqOutboxEvent: ['namespace', 'messageId', 'status', 'fencingToken', 'leaseExpiresAt', 'nextAttemptAt']
+        ResilientMqOutboxEvent: ['namespace', 'messageId', 'status', 'fencingToken', 'leaseExpiresAt', 'nextAttemptAt'],
+        ResilientMqMetricEvent: ['namespace', 'name', 'timestamp']
     } as const;
     for (const [name, fields] of Object.entries(required)) {
         const body = models.get(name)?.body;
@@ -185,6 +198,18 @@ function validateOwnedModels(models: Map<string, ModelBlock>): void {
         const declared = new Set([...body.matchAll(/^\s*([A-Za-z][A-Za-z0-9_]*)\s+/gm)].map(match => match[1]));
         const missing = fields.filter(field => !declared.has(field));
         if (missing.length) throw new Error(`Existing ${name} model is incompatible; missing ${missing.join(', ')}`);
+    }
+    validateRequestedTable(models.get('ResilientMqInboxEvent'), options.tables?.inbox, 'inbox');
+    validateRequestedTable(models.get('ResilientMqOutboxEvent'), options.tables?.outbox, 'outbox');
+    validateRequestedTable(models.get(RESILIENTMQ_METRICS_MODEL_NAME), options.tables?.metrics, 'metrics');
+}
+
+function validateRequestedTable(model: ModelBlock | undefined, requested: string | undefined, purpose: string): void {
+    if (!model || requested === undefined) return;
+    const mapped = /@@map\(\s*"((?:[^"\\]|\\.)*)"\s*\)/.exec(model.body)?.[1];
+    const actual = mapped ? JSON.parse(`"${mapped}"`) as string : undefined;
+    if (actual !== requested) {
+        throw new Error(`Existing ResilientMQ ${purpose} model maps to "${actual ?? 'default'}", not "${requested}"`);
     }
 }
 

@@ -59,6 +59,29 @@ Applications should retain those indexes when extending the models. Changes to
 column names, unique constraints, status fields, lease fields, or fencing fields
 are incompatible with the connector contract.
 
+## JSON storage
+
+The schema installer reads the datasource from the resolved application schema.
+PostgreSQL uses `JSONB`; MySQL and MariaDB use their Prisma `Json` mapping; and
+SQLite uses the JSON support available in Prisma 6.2 and later. The connector
+stores payloads and AMQP properties as JSON values rather than JSON encoded
+inside text columns.
+
+Physical table names are customizable through `@@map`. Prisma model names stay
+stable so generated delegate access remains direct and does not add a dynamic
+query layer.
+
+## Metric facts
+
+The optional `ResilientMqMetricEvent` model stores compact immutable facts from
+core's `MetricsSink` contract. The factory shares one bounded
+`BufferedMetricsSink` between consumer and publisher bindings, keeping database
+I/O outside delivery acknowledgement and publisher confirmation paths.
+
+Metric persistence is observational. A dropped or failed metric must never
+change event correctness. Flush the buffer during graceful application shutdown
+before disconnecting the application-owned Prisma client.
+
 ## Schema rollout
 
 The schema installer only adds complete missing models. If exactly one model is
@@ -67,7 +90,8 @@ repair application-owned schema content.
 
 Use this rollout order:
 
-1. Run `resilientmq-prisma init` in development.
+1. Run `resilientmq-prisma init`, optionally with `--metrics` and table mappings,
+   in development.
 2. Review and commit the schema and generated migration.
 3. Validate with `resilientmq-prisma schema check` in CI.
 4. Deploy the migration before starting application code that configures the

@@ -32,6 +32,18 @@ export interface PrismaModelNames {
 
     /** Delegate for the ResilientMqOutboxEvent model. */
     outbox: string;
+
+    /** Delegate for the optional ResilientMqMetricEvent model. */
+    metrics: string;
+}
+
+/** Optional buffered metrics persistence settings. */
+export interface PrismaMetricsOptions {
+    /** Maximum metric facts retained in memory while storage is unavailable. */
+    bufferCapacity?: number;
+
+    /** Maximum metric facts drained during each buffer pass. */
+    batchSize?: number;
 }
 
 /** Shared store configuration. */
@@ -44,6 +56,9 @@ export interface PrismaEventStoreOptions {
 
     /** Optional generated delegate name overrides. */
     models?: Partial<PrismaModelNames>;
+
+    /** Enables a buffered Prisma metrics sink and runtime bindings. */
+    metrics?: boolean | PrismaMetricsOptions;
 }
 
 /** Fully resolved store configuration. */
@@ -65,4 +80,25 @@ export interface PrismaEventStores {
 
     /** Store used by ResilientEventPublisher. */
     publisher: import('./publisher-store.js').PrismaPublisherEventStore;
+
+    /** Shared buffered metrics sink when metrics persistence is enabled. */
+    metricsSink?: import('@resilientmq/core').BufferedMetricsSink;
+
+    /** Store and optional metrics sink ready to spread into ResilientConsumer config. */
+    consumerOptions: {
+        /** Atomic inbox store. */
+        store: import('./consumer-store.js').PrismaConsumerEventStore;
+
+        /** Buffered metrics sink when enabled. */
+        metricsSink?: import('@resilientmq/core').BufferedMetricsSink;
+    };
+
+    /** Store and optional metrics sink ready to spread into ResilientEventPublisher config. */
+    publisherOptions: {
+        /** Distributed outbox store. */
+        store: import('./publisher-store.js').PrismaPublisherEventStore;
+
+        /** Buffered metrics sink when enabled. */
+        metricsSink?: import('@resilientmq/core').BufferedMetricsSink;
+    };
 }

@@ -8,8 +8,14 @@ import type {
 
 const DEFAULT_MODELS: PrismaModelNames = {
     inbox: 'resilientMqInboxEvent',
-    outbox: 'resilientMqOutboxEvent'
+    outbox: 'resilientMqOutboxEvent',
+    metrics: 'resilientMqMetricEvent'
 };
+
+/** Returns generated delegate names with application overrides applied. */
+export function resolveModelNames(overrides?: Partial<PrismaModelNames>): PrismaModelNames {
+    return {...DEFAULT_MODELS, ...overrides};
+}
 
 /** Resolves and validates the generated Prisma delegates. */
 export function resolveStoreOptions(options: PrismaEventStoreOptions): ResolvedPrismaEventStoreOptions {
@@ -17,7 +23,7 @@ export function resolveStoreOptions(options: PrismaEventStoreOptions): ResolvedP
         throw new Error('Prisma event store namespace must not be empty');
     }
 
-    const names = {...DEFAULT_MODELS, ...options.models};
+    const names = resolveModelNames(options.models);
     return {
         namespace: options.namespace,
         inbox: resolveDelegate(options.client, names.inbox),

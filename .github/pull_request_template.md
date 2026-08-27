@@ -26,6 +26,7 @@
 - [ ] Expired lease recovery and stale fencing are covered.
 - [ ] Schema installation remains idempotent.
 - [ ] Supported Prisma versions and providers are covered.
+- [ ] Native JSON, optional metrics, and custom table mappings are covered.
 - [ ] Public API, migration behavior, and CHANGELOG are updated.
 
 ## Related issue

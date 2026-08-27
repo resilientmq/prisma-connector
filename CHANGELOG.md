@@ -26,6 +26,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   coverage for serialization, timestamps, schema discovery, and CLI execution.
 - Clean-checkout type checking that generates and validates integration clients
   before checking database-specific test types.
+- Datasource-driven native JSON models for PostgreSQL, MySQL/MariaDB, and SQLite.
+- Optional persisted metric facts with a shared bounded buffer and ready-to-use
+  consumer and publisher configuration bindings.
+- Physical inbox, outbox, and metrics table mappings configurable during schema
+  installation without renaming Prisma models or delegates.
 - Persistence model and production schema rollout documentation.
 - npm trusted publishing workflow using GitHub OIDC and provenance.
 

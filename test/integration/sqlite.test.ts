@@ -64,6 +64,23 @@ describe('Prisma 7 SQLite integration', () => {
             ON resilientmq_outbox_events(namespace, messageId);
         CREATE INDEX IF NOT EXISTS outbox_claims
             ON resilientmq_outbox_events(namespace, status, nextAttemptAt, leaseExpiresAt);
+        CREATE TABLE IF NOT EXISTS resilientmq_metric_events (
+            id TEXT NOT NULL PRIMARY KEY,
+            namespace TEXT NOT NULL,
+            name TEXT NOT NULL,
+            timestamp DATETIME NOT NULL,
+            messageId TEXT,
+            serviceId TEXT,
+            instanceId TEXT,
+            attempt INTEGER,
+            durationMs INTEGER,
+            errorName TEXT,
+            createdAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS metrics_time
+            ON resilientmq_metric_events(namespace, timestamp);
+        CREATE INDEX IF NOT EXISTS metrics_name_time
+            ON resilientmq_metric_events(namespace, name, timestamp);
     `);
     database.close();
 
@@ -71,12 +88,14 @@ describe('Prisma 7 SQLite integration', () => {
     const prisma = new PrismaClient({adapter});
     const stores = createPrismaEventStores({
         client: prisma as unknown as PrismaClientLike,
-        namespace: 'integration'
+        namespace: 'integration',
+        metrics: true
     });
 
     beforeEach(async () => {
         await prisma.resilientMqInboxEvent.deleteMany();
         await prisma.resilientMqOutboxEvent.deleteMany();
+        await prisma.resilientMqMetricEvent.deleteMany();
     });
 
     afterAll(async () => {
@@ -152,5 +171,24 @@ describe('Prisma 7 SQLite integration', () => {
         const row = await prisma.resilientMqInboxEvent.findFirstOrThrow();
         expect(row.status).toBe(EventConsumeStatus.DONE);
         expect(row.leaseExpiresAt).toBeNull();
+    });
+
+    it('persists buffered metric facts outside the event path', async () => {
+        stores.metricsSink?.emit({
+            name: 'consume.completed',
+            timestamp: 1_500,
+            messageId: message.messageId,
+            serviceId: 'consumer',
+            durationMs: 25
+        });
+        await stores.metricsSink?.flush();
+        await expect(prisma.resilientMqMetricEvent.findMany()).resolves.toMatchObject([{
+            namespace: 'integration',
+            name: 'consume.completed',
+            messageId: message.messageId,
+            serviceId: 'consumer',
+            durationMs: 25,
+            timestamp: new Date(1_500)
+        }]);
     });
 });

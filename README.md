@@ -49,10 +49,10 @@ Install the Prisma client, CLI, and driver adapter required by the application.
 
 ## Quick start
 
-Add the persistence models to the application schema:
+Add provider-optimized persistence models to the application schema:
 
 ```bash
-npx resilientmq-prisma init --schema ./prisma/schema.prisma
+npx resilientmq-prisma init --metrics
 ```
 
 Review the generated schema, create a migration, and regenerate the client:
@@ -72,18 +72,19 @@ import {PrismaEventStoreFactory} from '@resilientmq/prisma-connector';
 const prisma = new PrismaClient({adapter});
 const storeFactory = new PrismaEventStoreFactory({
   client: prisma,
-  namespace: 'orders-production'
+  namespace: 'orders-production',
+  metrics: true
 });
 const stores = storeFactory.createEventStores();
 
 const consumer = new ResilientConsumer({
   ...consumerConfig,
-  store: stores.consumer
+  ...stores.consumerOptions
 });
 
 const publisher = new ResilientEventPublisher({
   ...publisherConfig,
-  store: stores.publisher
+  ...stores.publisherOptions
 });
 ```
 
@@ -94,7 +95,8 @@ import {createPrismaEventStores} from '@resilientmq/prisma-connector';
 
 const stores = createPrismaEventStores({
   client: prisma,
-  namespace: 'orders-production'
+  namespace: 'orders-production',
+  metrics: true
 });
 ```
 
@@ -103,19 +105,59 @@ between applications that may reuse message IDs. Do not disconnect Prisma from
 the connector; start and stop the application-owned client at the application
 boundary.
 
+When metrics persistence is enabled, consumer and publisher share one buffered
+sink. Flush it during graceful shutdown before disconnecting Prisma:
+
+```ts
+await consumer.stop();
+await publisher.disconnect();
+await stores.metricsSink?.flush();
+await prisma.$disconnect();
+```
+
 ## Schema management
 
 | Command | Behavior |
 | --- | --- |
-| `resilientmq-prisma init` | Adds both models and runs `prisma format`. |
+| `resilientmq-prisma init` | Adds inbox and outbox models and runs `prisma format`. |
+| `resilientmq-prisma init --metrics` | Also adds the event-oriented metrics model. |
 | `resilientmq-prisma schema check` | Exits non-zero when models are absent or incompatible. |
 | `resilientmq-prisma schema print` | Prints the provider-neutral models. |
-| `resilientmq-prisma schema print --provider mysql` | Prints models with unbounded MySQL text columns. |
+| `resilientmq-prisma schema print --provider postgresql` | Prints PostgreSQL models with native JSONB. |
 
-Schema discovery checks `--schema`, `package.json`, `prisma.config.*`, and the
-conventional Prisma paths. A schema file or multi-file schema directory is
-supported. Partially installed or incompatible models fail without overwriting
+Schema discovery gives an explicit `--schema` highest priority, then checks the
+`prisma.schema` path in the application's `package.json`, `prisma.config.*`, and
+finally the conventional `prisma/schema.prisma` and `schema.prisma` paths. A
+schema file or multi-file schema directory is supported. The datasource is read
+from that resolved primary schema or a sibling schema file.
+
+The detected provider controls storage types:
+
+| Provider | Payload and properties | Error details |
+| --- | --- | --- |
+| PostgreSQL | `Json @db.JsonB` | Native PostgreSQL text |
+| MySQL/MariaDB | `Json` | `TEXT` and `LONGTEXT` where needed |
+| SQLite | `Json` | Prisma SQLite JSON mapping |
+
+Prisma 6.19 is above the Prisma 6.2 release that introduced SQLite JSON
+support. Partially installed or incompatible models fail without overwriting
 application schema content.
+
+Provider-specific reference fragments are published in `prisma/postgresql`,
+`prisma/mysql`, and `prisma/sqlite`. The CLI remains the preferred installation
+path because it detects the application's provider and preserves its existing
+schema layout.
+
+Physical table names can be changed without changing Prisma model names or
+generated delegate access:
+
+```bash
+npx resilientmq-prisma init \
+  --metrics \
+  --inbox-table app_event_inbox \
+  --outbox-table app_event_outbox \
+  --metrics-table app_resilience_metrics
+```
 
 The installer never creates a migration unless explicitly requested:
 
@@ -154,6 +196,32 @@ const factory = new PrismaEventStoreFactory({
 });
 ```
 
+Physical table overrides from the CLI only change `@@map`. Delegate overrides
+are therefore unnecessary unless the application manually renames the Prisma
+models themselves. Metrics delegates can be overridden with `models.metrics`.
+
+## Persisted metrics
+
+`metrics: true` resolves `resilientMqMetricEvent`, creates a
+`PrismaMetricsSink`, and wraps it in core's `BufferedMetricsSink`. Emission stays
+outside RabbitMQ ACK and publisher-confirm paths. Each row is one compact fact:
+name, timestamp, message identity, stable service identity, process identity,
+attempt, duration, and error name. Payloads and stacks are deliberately absent.
+
+`consumerOptions` and `publisherOptions` already contain the correct store and
+shared `metricsSink`. Core's independent `metricsEnabled` option may still be
+used when an in-process aggregate returned by `getMetrics()` is also required.
+
+Buffer bounds are configurable:
+
+```ts
+const stores = createPrismaEventStores({
+  client: prisma,
+  namespace: 'orders-production',
+  metrics: {bufferCapacity: 20_000, batchSize: 200}
+});
+```
+
 ## Prisma 8 prerelease
 
 Prisma 8 uses a contract-based collection API rather than the stable generated
@@ -177,9 +245,10 @@ general availability.
 
 ## Persistence model
 
-Payloads and AMQP properties are serialized into provider-neutral text fields
-and must be JSON serializable. MySQL and MariaDB receive native `LONGTEXT`
-annotations to avoid bounded `VARCHAR` payload storage.
+Payloads and AMQP properties are stored as native JSON and must be JSON
+serializable. An internal JSON envelope preserves top-level primitives and
+`null` consistently across Prisma providers. Error stacks remain bounded text
+and metric rows never contain payloads or stacks.
 
 See [docs/persistence-model.md](docs/persistence-model.md) for identities,
 state transitions, leases, fencing, operational indexes, and failure recovery.

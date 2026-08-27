@@ -4,9 +4,9 @@ model ResilientMqInboxEvent {
   serviceId      String
   messageId      String
   type           String?
-  payloadJson    String   @db.LongText
+  payloadJson    Json
   routingKey     String?
-  propertiesJson String?  @db.LongText
+  propertiesJson Json?
   status         String
   attempt        Int      @default(0)
   instanceId     String?
@@ -30,9 +30,9 @@ model ResilientMqOutboxEvent {
   namespace      String
   messageId      String
   type           String?
-  payloadJson    String   @db.LongText
+  payloadJson    Json
   routingKey     String?
-  propertiesJson String?  @db.LongText
+  propertiesJson Json?
   status         String
   attempt        Int      @default(0)
   serviceId      String?

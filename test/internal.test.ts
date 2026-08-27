@@ -19,6 +19,8 @@ describe('Prisma value conversion', () => {
             status: 'PENDING'
         };
         const serialized = serializeEvent(event);
+        expect(serialized.payloadJson).toEqual({value: {orderId: 42}});
+        expect(serialized.propertiesJson).toEqual({value: {headers: {traceId: 'trace-1'}}});
         const restored = deserializeEvent({
             ...serialized,
             status: event.status
