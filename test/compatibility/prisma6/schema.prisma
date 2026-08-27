@@ -1,0 +1,64 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated-prisma6"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./test.db"
+}
+
+model ResilientMqInboxEvent {
+  id String @id @default(cuid())
+  namespace String
+  serviceId String
+  messageId String
+  type String?
+  payloadJson String
+  routingKey String?
+  propertiesJson String?
+  status String
+  attempt Int @default(0)
+  instanceId String?
+  fencingToken String?
+  leaseExpiresAt DateTime?
+  lastAttemptAt DateTime?
+  completedAt DateTime?
+  errorName String?
+  errorMessage String?
+  errorStack String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([namespace, serviceId, messageId])
+  @@index([namespace, status, leaseExpiresAt])
+  @@map("resilientmq_inbox_events")
+}
+
+model ResilientMqOutboxEvent {
+  id String @id @default(cuid())
+  namespace String
+  messageId String
+  type String?
+  payloadJson String
+  routingKey String?
+  propertiesJson String?
+  status String
+  attempt Int @default(0)
+  serviceId String?
+  instanceId String?
+  fencingToken String?
+  leaseExpiresAt DateTime?
+  nextAttemptAt DateTime?
+  lastAttemptAt DateTime?
+  publishedAt DateTime?
+  errorName String?
+  errorMessage String?
+  errorStack String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([namespace, messageId])
+  @@index([namespace, status, nextAttemptAt, leaseExpiresAt])
+  @@map("resilientmq_outbox_events")
+}

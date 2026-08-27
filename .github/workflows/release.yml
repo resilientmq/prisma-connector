@@ -1,0 +1,140 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*.*.*']
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Validate the release without publishing to npm
+        type: boolean
+        default: true
+
+concurrency:
+  group: prisma-connector-release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: '24'
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  validate:
+    name: Validate release
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.package.outputs.version }}
+      should_publish: ${{ steps.mode.outputs.publish }}
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          registry-url: https://registry.npmjs.org/
+          package-manager-cache: false
+
+      - name: Install npm trusted publishing support
+        run: npm install --global npm@^11.5.1
+
+      - name: Read package metadata
+        id: package
+        shell: bash
+        run: |
+          echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+          echo "name=$(node -p "require('./package.json').name")" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve release mode
+        id: mode
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          if [ "$EVENT_NAME" = workflow_dispatch ] && [ "$DRY_RUN" = true ]; then
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Validate tag and package version
+        if: steps.mode.outputs.publish == 'true'
+        shell: bash
+        run: |
+          case "$GITHUB_REF" in refs/tags/v*.*.*) ;; *) echo "::error::Publishing requires a version tag"; exit 1;; esac
+          test "${GITHUB_REF_NAME#v}" = "${{ steps.package.outputs.version }}" || { echo "::error::Tag and package version differ"; exit 1; }
+
+      - name: Validate changelog
+        run: grep -q "\[${{ steps.package.outputs.version }}\]" CHANGELOG.md
+
+      - name: Require normalized npm metadata
+        shell: bash
+        run: |
+          cp package.json /tmp/package.json.before
+          npm pkg fix
+          cmp -s package.json /tmp/package.json.before || { git --no-pager diff -- package.json; exit 1; }
+
+      - run: npm ci
+      - run: npm audit --audit-level=high
+      - run: npm run typecheck
+      - run: npm run test:unit
+      - run: npm run test:integration
+      - run: npm run build
+      - run: npm pack --dry-run
+
+      - name: Reject an existing npm version
+        if: steps.mode.outputs.publish == 'true'
+        shell: bash
+        run: |
+          if npm view "${{ steps.package.outputs.name }}@${{ steps.package.outputs.version }}" version >/dev/null 2>&1; then
+            echo "::error::Package version already exists"
+            exit 1
+          fi
+
+  publish:
+    name: Publish to npm
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: validate
+    environment: npm
+    permissions:
+      contents: write
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          registry-url: https://registry.npmjs.org/
+          package-manager-cache: false
+
+      - run: npm install --global npm@^11.5.1
+      - run: npm ci
+      - run: npm run build
+
+      - name: Verify GitHub OIDC availability
+        if: needs.validate.outputs.should_publish == 'true'
+        shell: bash
+        run: |
+          test -n "$ACTIONS_ID_TOKEN_REQUEST_URL" || { echo "::error::OIDC request URL is unavailable"; exit 1; }
+          test -n "$ACTIONS_ID_TOKEN_REQUEST_TOKEN" || { echo "::error::OIDC request token is unavailable"; exit 1; }
+
+      - name: Publish with npm trusted publishing
+        if: needs.validate.outputs.should_publish == 'true'
+        run: npm publish --access public --provenance
+
+      - name: Validate npm publication locally
+        if: needs.validate.outputs.should_publish == 'false'
+        run: npm publish --access public --dry-run
+
+      - name: Create GitHub release
+        if: needs.validate.outputs.should_publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" --verify-tag --title "$GITHUB_REF_NAME" --generate-notes
