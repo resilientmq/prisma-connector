@@ -8,7 +8,10 @@ import {createPrismaEventStores, type PrismaClientLike} from '../../src/index.js
 interface IntegrationPrismaClient extends PrismaClientLike {
     $disconnect(): Promise<void>;
     resilientMqInboxEvent: {deleteMany(): Promise<unknown>};
-    resilientMqOutboxEvent: {deleteMany(): Promise<unknown>};
+    resilientMqOutboxEvent: {
+        deleteMany(): Promise<unknown>;
+        findFirstOrThrow(): Promise<Record<string, unknown>>;
+    };
     resilientMqMetricEvent: {deleteMany(): Promise<unknown>; findMany(): Promise<Array<Record<string, unknown>>>};
 }
 
@@ -70,8 +73,17 @@ integration(`Prisma 7 ${provider ?? 'relational'} integration`, () => {
 
     it('stores native JSON payloads and buffered metric facts', async () => {
         const stores = createPrismaEventStores({client: prisma, namespace: 'relational', metrics: true});
-        await stores.publisher.saveEvent(message);
-        await expect(stores.publisher.getEvent(message)).resolves.toMatchObject(message);
+        const directMessage: EventMessage = {
+            ...message,
+            payload: {valid: true, nested: {provider}},
+            properties: {headers: {traceId: 'relational-trace'}}
+        };
+        await stores.publisher.saveEvent(directMessage);
+        await expect(stores.publisher.getEvent(directMessage)).resolves.toMatchObject(directMessage);
+        const row = await prisma.resilientMqOutboxEvent.findFirstOrThrow();
+        expect(row.payloadJson).toEqual(directMessage.payload);
+        expect(row.propertiesJson).toEqual(directMessage.properties);
+        expect(row.payloadJson).not.toHaveProperty('value');
         stores.metricsSink?.emit({name: 'publish.confirmed', timestamp: 2_000, messageId: message.messageId});
         await stores.metricsSink?.flush();
         await expect(prisma.resilientMqMetricEvent.findMany()).resolves.toMatchObject([{
@@ -80,5 +92,14 @@ integration(`Prisma 7 ${provider ?? 'relational'} integration`, () => {
             messageId: message.messageId,
             timestamp: new Date(2_000)
         }]);
+    });
+
+    it('round-trips a top-level JSON null payload', async () => {
+        const stores = createPrismaEventStores({client: prisma, namespace: 'relational'});
+        const event: EventMessage = {messageId: 'relational-json-null', payload: null};
+        await stores.publisher.saveEvent(event);
+        await expect(stores.publisher.getEvent(event)).resolves.toMatchObject(event);
+        const row = await prisma.resilientMqOutboxEvent.findFirstOrThrow();
+        expect(row.payloadJson).toBeNull();
     });
 });

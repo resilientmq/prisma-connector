@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-08-28
+
+### Added
+
+- Professional package and runtime badges, navigation, and a dynamic contributor
+  gallery in the README.
+
+### Fixed
+
+- Store payloads and AMQP properties directly in native JSON columns instead of
+  wrapping every value inside an artificial `{value: ...}` object.
+- Omit absent AMQP properties so nullable JSON columns store database `NULL`
+  rather than `{absent: true}`.
+- Preserve read compatibility with rows written by the 0.1.0 envelope and the
+  earlier JSON-string representation.
+
 ## [0.1.0] - 2026-08-27
 
 ### Added
@@ -34,5 +50,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Persistence model and production schema rollout documentation.
 - npm trusted publishing workflow using GitHub OIDC and provenance.
 
-[Unreleased]: https://github.com/resilientmq/prisma-connector/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/resilientmq/prisma-connector/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/resilientmq/prisma-connector/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/resilientmq/prisma-connector/releases/tag/v0.1.0

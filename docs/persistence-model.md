@@ -64,8 +64,15 @@ are incompatible with the connector contract.
 The schema installer reads the datasource from the resolved application schema.
 PostgreSQL uses `JSONB`; MySQL and MariaDB use their Prisma `Json` mapping; and
 SQLite uses the JSON support available in Prisma 6.2 and later. The connector
-stores payloads and AMQP properties as JSON values rather than JSON encoded
-inside text columns.
+stores payloads and AMQP properties directly as JSON values rather than JSON
+encoded inside text columns or nested under a connector-owned wrapper. Database
+JSON operators can therefore address application fields directly. The reader
+continues to decode the `{value: ...}` envelope written by version 0.1.0 and the
+earlier JSON-string representation so rolling upgrades do not invalidate
+pending events.
+
+When AMQP properties are absent, the write omits `propertiesJson` and the
+nullable database column remains `NULL`.
 
 Physical table names are customizable through `@@map`. Prisma model names stay
 stable so generated delegate access remains direct and does not add a dynamic

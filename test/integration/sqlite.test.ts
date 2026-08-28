@@ -191,4 +191,25 @@ describe('Prisma 7 SQLite integration', () => {
             timestamp: new Date(1_500)
         }]);
     });
+
+    it('stores payloads and properties as direct JSON values', async () => {
+        const direct: EventMessage = {
+            messageId: 'direct-json',
+            payload: {orderId: 42, nested: {valid: true}},
+            properties: {headers: {traceId: 'trace-1'}}
+        };
+        await stores.publisher.saveEvent(direct);
+        const row = await prisma.resilientMqOutboxEvent.findFirstOrThrow();
+        expect(row.payloadJson).toEqual(direct.payload);
+        expect(row.propertiesJson).toEqual(direct.properties);
+        expect(row.payloadJson).not.toHaveProperty('value');
+    });
+
+    it('round-trips a top-level JSON null payload', async () => {
+        const event: EventMessage = {messageId: 'json-null', payload: null};
+        await stores.publisher.saveEvent(event);
+        await expect(stores.publisher.getEvent(event)).resolves.toMatchObject(event);
+        const row = await prisma.resilientMqOutboxEvent.findFirstOrThrow();
+        expect(row.payloadJson).toBeNull();
+    });
 });
