@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Create a missing package version tag after successful default-branch CI and
+  explicitly dispatch the OIDC release workflow from that tag.
+
 ## [0.1.1] - 2026-08-28
 
 ### Added
