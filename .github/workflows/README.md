@@ -6,6 +6,11 @@ Runs type checking, enforced unit coverage, Prisma 6 compatibility, Prisma 7 SQL
 PostgreSQL and MariaDB integration tests, a production build, package metadata
 normalization, audit, and tarball inspection.
 
+After a successful push to `main` or `master`, CI reads the version from
+`package.json`. If its `vX.Y.Z` tag does not exist, CI creates an annotated tag
+from the matching changelog section and explicitly starts `release.yml` on that
+tag. Existing tags are left unchanged.
+
 Coverage fails below 90% statements, lines, or functions and below 80%
 branches. The summary and browsable LCOV report are retained as CI artifacts.
 
