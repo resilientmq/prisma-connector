@@ -12,27 +12,37 @@ export interface StoredEventRow {
 
 /** Serializes an event into provider-neutral scalar fields. */
 export function serializeEvent(event: EventMessage): Record<string, unknown> {
-    return {
+    const serialized: Record<string, unknown> = {
         messageId: event.messageId,
         type: event.type ?? null,
-        payloadJson: jsonEnvelope(event.payload, 'payload'),
-        routingKey: event.routingKey ?? null,
-        propertiesJson: event.properties === undefined
-            ? {absent: true}
-            : jsonEnvelope(event.properties, 'properties')
+        payloadJson: jsonValue(event.payload, 'payload'),
+        routingKey: event.routingKey ?? null
     };
+    if (event.properties !== undefined) {
+        serialized.propertiesJson = jsonValue(event.properties, 'properties');
+    }
+    return serialized;
 }
 
 /** Reconstructs an event from a persistence row. */
 export function deserializeEvent(row: StoredEventRow): EventMessage {
+    const legacyEnvelope = isValueEnvelope(row.payloadJson)
+        && (isValueEnvelope(row.propertiesJson) || isAbsentEnvelope(row.propertiesJson));
     const event: EventMessage = {
         messageId: row.messageId,
-        payload: unwrapJson(row.payloadJson)
+        payload: decodeJson(
+            legacyEnvelope && isValueEnvelope(row.payloadJson)
+                ? envelopeValue(row.payloadJson)
+                : row.payloadJson
+        )
     };
     if (row.type !== null && row.type !== undefined) event.type = row.type;
     if (row.routingKey !== null && row.routingKey !== undefined) event.routingKey = row.routingKey;
     if (row.propertiesJson !== null && row.propertiesJson !== undefined && !isAbsentEnvelope(row.propertiesJson)) {
-        event.properties = unwrapJson(row.propertiesJson) as NonNullable<EventMessage['properties']>;
+        const storedProperties = legacyEnvelope && isValueEnvelope(row.propertiesJson)
+            ? envelopeValue(row.propertiesJson)
+            : row.propertiesJson;
+        event.properties = decodeJson(storedProperties) as NonNullable<EventMessage['properties']>;
     }
     if (row.status !== null && row.status !== undefined) event.status = row.status;
     return event;
@@ -66,21 +76,18 @@ export function asStoredEventRow(value: unknown): StoredEventRow {
     return row as unknown as StoredEventRow;
 }
 
-function jsonEnvelope(value: unknown, field: string): {value: unknown} {
+function jsonValue(value: unknown, field: string): unknown {
     try {
         const serialized = JSON.stringify(value);
         if (serialized === undefined) throw new Error(`${field} is not JSON serializable`);
-        return {value: JSON.parse(serialized)};
+        return JSON.parse(serialized);
     } catch (error) {
         const detail = error instanceof Error ? `: ${error.message}` : '';
         throw new TypeError(`Event ${field} is not JSON serializable${detail}`, {cause: error});
     }
 }
 
-function unwrapJson(value: unknown): unknown {
-    if (value && typeof value === 'object' && 'value' in value) {
-        return (value as {value: unknown}).value;
-    }
+function decodeJson(value: unknown): unknown {
     if (typeof value === 'string') {
         try {
             return JSON.parse(value);
@@ -91,6 +98,24 @@ function unwrapJson(value: unknown): unknown {
     return value;
 }
 
+function isValueEnvelope(value: unknown): value is {value: unknown} {
+    return Boolean(
+        value
+        && typeof value === 'object'
+        && Object.keys(value).length === 1
+        && Object.hasOwn(value, 'value')
+    );
+}
+
+function envelopeValue(value: {value: unknown}): unknown {
+    return value.value;
+}
+
 function isAbsentEnvelope(value: unknown): boolean {
-    return Boolean(value && typeof value === 'object' && (value as {absent?: unknown}).absent === true);
+    return Boolean(
+        value
+        && typeof value === 'object'
+        && Object.keys(value).length === 1
+        && (value as {absent?: unknown}).absent === true
+    );
 }

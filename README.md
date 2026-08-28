@@ -1,11 +1,37 @@
 # @resilientmq/prisma-connector
 
+<!-- Package -->
+[![npm version](https://img.shields.io/npm/v/@resilientmq/prisma-connector.svg?logo=npm)](https://www.npmjs.com/package/@resilientmq/prisma-connector)
+[![CI](https://img.shields.io/github/actions/workflow/status/resilientmq/prisma-connector/ci.yml?branch=main&logo=github&label=CI)](https://github.com/resilientmq/prisma-connector/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![TypeScript](https://img.shields.io/badge/TypeScript-6.x-3178C6.svg?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+
+<!-- Runtime -->
+[![Node.js](https://img.shields.io/badge/Node.js-%3E%3D20.19-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org/)
+[![Prisma](https://img.shields.io/badge/Prisma-6.19%20%7C%207%20%7C%208_experimental-2D3748?logo=prisma&logoColor=white)](https://www.prisma.io/)
+[![ResilientMQ core](https://img.shields.io/badge/ResilientMQ_core-3.x-5C2D91)](https://www.npmjs.com/package/@resilientmq/core)
+
 Prisma persistence for the fenced inbox and distributed outbox contracts in
 `@resilientmq/core`.
 
 The connector provides atomic ownership across replicas, lease recovery after
 process failure, and fencing that rejects writes from an expired owner. The
 application retains ownership of the Prisma client and its lifecycle.
+
+## Table of contents
+
+- [Delivery guarantees](#delivery-guarantees)
+- [Compatibility](#compatibility)
+- [Installation](#installation)
+- [Quick start](#quick-start)
+- [Schema management](#schema-management)
+- [Custom generated model names](#custom-generated-model-names)
+- [Persisted metrics](#persisted-metrics)
+- [Prisma 8 prerelease](#prisma-8-prerelease)
+- [Persistence model](#persistence-model)
+- [Development](#development)
+- [Contributors](#contributors)
+- [License](#license)
 
 ## Delivery guarantees
 
@@ -246,9 +272,11 @@ general availability.
 ## Persistence model
 
 Payloads and AMQP properties are stored as native JSON and must be JSON
-serializable. An internal JSON envelope preserves top-level primitives and
-`null` consistently across Prisma providers. Error stacks remain bounded text
-and metric rows never contain payloads or stacks.
+serializable. Objects and arrays are persisted directly without a connector
+wrapper, so database JSON operators address application fields at their natural
+path. Rows written by 0.1.0 with `{value: ...}` remain readable during rolling
+upgrades. Error stacks remain bounded text and metric rows never contain
+payloads or stacks.
 
 See [docs/persistence-model.md](docs/persistence-model.md) for identities,
 state transitions, leases, fencing, operational indexes, and failure recovery.
@@ -270,6 +298,14 @@ delayed publication retries, namespace isolation, schema transformations,
 Prisma 6.19 compatibility, and real SQLite, PostgreSQL, and MariaDB execution.
 CI enforces at least 90% statements, lines, and functions, plus 80% branches.
 
+## Contributors
+
+Thanks to everyone who has contributed to this project:
+
+[![Contributors](https://contrib.rocks/image?repo=resilientmq/prisma-connector)](https://github.com/resilientmq/prisma-connector/graphs/contributors)
+
+Want to help? Read [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## License
 
-MIT
+[MIT](LICENSE) © [ResilientMQ](https://github.com/resilientmq)

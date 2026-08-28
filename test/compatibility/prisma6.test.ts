@@ -7,7 +7,10 @@ import {createPrismaEventStores, type PrismaClientLike} from '../../src/index.js
 interface Prisma6Client extends PrismaClientLike {
     $disconnect(): Promise<void>;
     resilientMqInboxEvent: {deleteMany(): Promise<unknown>};
-    resilientMqOutboxEvent: {deleteMany(): Promise<unknown>};
+    resilientMqOutboxEvent: {
+        deleteMany(): Promise<unknown>;
+        findFirstOrThrow(): Promise<Record<string, unknown>>;
+    };
 }
 
 type Prisma6ClientConstructor = new () => Prisma6Client;
@@ -91,6 +94,9 @@ compatibility('Prisma 6 compatibility', () => {
         const event: EventMessage = {messageId: 'event-1', payload: {version: 6}};
         expect(await stores.publisher.saveEventIfNotExists(event)).toBe(true);
         expect(await stores.publisher.saveEventIfNotExists(event)).toBe(false);
+        const stored = await prisma.resilientMqOutboxEvent.findFirstOrThrow();
+        expect(stored.payloadJson).toEqual({version: 6});
+        expect(stored.propertiesJson).toBeNull();
         const claims = await Promise.all(Array.from({length: 16}, (_, index) => stores.consumer.claimConsumeEvent({
             event,
             serviceId: 'consumer',

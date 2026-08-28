@@ -19,8 +19,8 @@ describe('Prisma value conversion', () => {
             status: 'PENDING'
         };
         const serialized = serializeEvent(event);
-        expect(serialized.payloadJson).toEqual({value: {orderId: 42}});
-        expect(serialized.propertiesJson).toEqual({value: {headers: {traceId: 'trace-1'}}});
+        expect(serialized.payloadJson).toEqual({orderId: 42});
+        expect(serialized.propertiesJson).toEqual({headers: {traceId: 'trace-1'}});
         const restored = deserializeEvent({
             ...serialized,
             status: event.status
@@ -30,9 +30,36 @@ describe('Prisma value conversion', () => {
     });
 
     it('omits absent optional event fields', () => {
+        expect(serializeEvent({messageId: 'minimal', payload: null})).not.toHaveProperty('propertiesJson');
         expect(deserializeEvent({messageId: 'minimal', payloadJson: 'null'})).toEqual({
             messageId: 'minimal',
             payload: null
+        });
+    });
+
+    it('reads legacy envelopes without wrapping new JSON documents', () => {
+        expect(deserializeEvent({
+            messageId: 'legacy',
+            payloadJson: {value: {orderId: 42}},
+            propertiesJson: {value: {headers: {traceId: 'trace-1'}}}
+        })).toEqual({
+            messageId: 'legacy',
+            payload: {orderId: 42},
+            properties: {headers: {traceId: 'trace-1'}}
+        });
+        expect(deserializeEvent({
+            messageId: 'legacy-absent',
+            payloadJson: {value: {orderId: 43}},
+            propertiesJson: {absent: true}
+        })).toEqual({messageId: 'legacy-absent', payload: {orderId: 43}});
+        expect(deserializeEvent({
+            messageId: 'direct-value-key',
+            payloadJson: {value: {nested: true}},
+            propertiesJson: {headers: {direct: true}}
+        })).toEqual({
+            messageId: 'direct-value-key',
+            payload: {value: {nested: true}},
+            properties: {headers: {direct: true}}
         });
     });
 

@@ -1,6 +1,6 @@
 {
   "name": "@resilientmq/prisma-connector",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Prisma persistence connector for resilient RabbitMQ inbox and outbox processing",
   "type": "module",
   "sideEffects": false,
